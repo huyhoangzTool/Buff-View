@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zefoy View Buffer</title>
+<style>
+  /* Reset cơ bản */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* Nền tối toàn cục */
+  body {
+    font-family: 'Courier New', monospace;
+    background: #0d0d0d;
+    color: #00ff9d;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  /* Khung chính */
+  .container {
+    width: 100%;
+    max-width: 520px;
+    background: #111;
+    border: 1px solid #00ff9d;
+    border-radius: 6px;
+    padding: 28px;
+    box-shadow: 0 0 24px rgba(0,255,157,0.15);
+  }
+
+  /* Tiêu đề */
+  h1 {
+    font-size: 18px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 22px;
+    color: #00ff9d;
+    text-shadow: 0 0 8px rgba(0,255,157,0.5);
+  }
+
+  /* Nhãn input */
+  label {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: #7dffc4;
+  }
+
+  /* Ô nhập liệu */
+  input, select {
+    width: 100%;
+    padding: 10px 12px;
+    background: #0a0a0a;
+    border: 1px solid #1f6f52;
+    color: #00ff9d;
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus, select:focus {
+    border-color: #00ff9d;
+  }
+
+  /* Nút hành động */
+  button {
+    width: 100%;
+    padding: 12px;
+    background: #00ff9d;
+    color: #0d0d0d;
+    border: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+  button:hover { background: #00cc7d; }
+  button:active { transform: scale(0.98); }
+  button:disabled {
+    background: #1f6f52;
+    color: #0d0d0d;
+    cursor: not-allowed;
+  }
+
+  /* Khu vực log */
+  .log {
+    margin-top: 18px;
+    background: #0a0a0a;
+    border: 1px solid #1f6f52;
+    border-radius: 4px;
+    padding: 12px;
+    height: 180px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .log p { margin-bottom: 4px; }
+  .log .ok  { color: #00ff9d; }
+  .log .err { color: #ff4d4d; }
+  .log .inf { color: #7dffc4; }
+
+  /* Thanh tiến trình */
+  .progress-bar {
+    width: 100%;
+    height: 6px;
+    background: #1f6f52;
+    border-radius: 3px;
+    margin-top: 14px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: #00ff9d;
+    transition: width 0.3s ease;
+  }
+
+  /* Ghi chú nhỏ */
+  .note {
+    font-size: 10px;
+    color: #4d9973;
+    text-align: center;
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>// Zefoy View Buffer //</h1>
+
+  <!-- Nhập URL video -->
+  <label for="videoUrl">URL Video (TikTok / Douyin)</label>
+  <input type="text" id="videoUrl" placeholder="https://www.tiktok.com/@user/video/123..." />
+
+  <!-- Chọn dịch vụ -->
+  <label for="serviceType">Loại dịch vụ</label>
+  <select id="serviceType">
+    <option value="views">Views</option>
+    <option value="hearts">Hearts</option>
+    <option value="shares">Shares</option>
+    <option value="favorites">Favorites</option>
+    <option value="comment_hearts">Comment Hearts</option>
+  </select>
+
+  <!-- Số lượng -->
+  <label for="amount">Số lượng</label>
+  <input type="number" id="amount" value="1000" min="1" max="100000" />
+
+  <!-- Nút bắt đầu -->
+  <button id="startBtn">Bắt đầu Buffer</button>
+
+  <!-- Thanh tiến trình -->
+  <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+  <!-- Khu vực log -->
+  <div class="log" id="log"></div>
+
+  <p class="note">Công cụ yêu cầu token phiên Zefoy hợp lệ.<br>Cập nhật token trong biến CONFIG trước khi chạy.</p>
+</div>
+
+<script>
+/* =========================================================================
+   CẤU HÌNH HỆ THỐNG
+   =========================================================================
+   - ZEFOY_BASE: điểm cuối API gốc của Zefoy.
+   - ENDPOINTS: ánh xạ từng dịch vụ tới đường dẫn API tương ứng.
+   - CONFIG.cookie: cookie phiên Zefoy (cập nhật thủ công).
+   - CONFIG.csrf: token CSRF lấy từ trang Zefoy.
+   ========================================================================= */
+const CONFIG = {
+  ZEFOY_BASE: "https://zefoy.com",
+  ENDPOINTS: {
+    views:          "/c2VuZC9mb2xeb3dlcnNfdGlrdG9r",
+    hearts:         "/c2VuZE9nb2t0cnluCg==",
+    shares:         "/c2VuZC9mb2xeb3dlcnNfdGlrdG9r",
+    favorites:      "/c2VuZE9nb2t0cnluCg==",
+    comment_hearts: "/c2VuZE9nb2t0cnluCg=="
+  },
+  // Cookie phiên làm việc của Zefoy - BẮT BUỘC cập nhật
+  cookie: "PHPSESSID=THAY_THE_PHPSESSID_CUA_BAN;",
+  // Token CSRF trích xuất từ form Zefoy
+  csrf: "THAY_TOKEN_CSRF",
+  // Khoảng nghỉ giữa các request (ms) để tránh rate-limit
+  delay: 1800,
+  // Số request tối đa mỗi phiên
+  maxRequests: 50
+};
+
+/* =========================================================================
+   THAM CHIẾU DOM
+   ========================================================================= */
+const el = {
+  url:       document.getElementById("videoUrl"),
+  service:   document.getElementById("serviceType"),
+  amount:    document.getElementById("amount"),
+  startBtn:  document.getElementById("startBtn"),
+  log:       document.getElementById("log"),
+  progress:  document.getElementById("progressFill")
+};
+
+/* =========================================================================
+   HÀM GHI LOG
+   =========================================================================
+   Ghi một dòng vào khu vực log với phân loại màu sắc.
+   type: "ok" | "err" | "inf"
+   ========================================================================= */
+function writeLog(message, type = "inf") {
+  const p = document.createElement("p");
+  p.className = type;
+  const ts = new Date().toLocaleTimeString("vi-VN");
+  p.textContent = `[${ts}] ${message}`;
+  el.log.appendChild(p);
+  el.log.scrollTop = el.log.scrollHeight;
+}
+
+/* =========================================================================
+   HÀM CẬP NHẬT TIẾN TRÌNH
+   ========================================================================= */
+function setProgress(percent) {
+  el.progress.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+}
+
+/* =========================================================================
+   HÀM TẠO HEADER REQUEST
+   =========================================================================
+   Mô phỏng header trình duyệt thực để vượt qua kiểm tra cơ bản.
+   ========================================================================= */
+function buildHeaders() {
+  return {
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Cookie": CONFIG.cookie,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                  "Chrome/120.0.0.0 Safari/537.36",
+    "Origin": CONFIG.ZEFOY_BASE,
+    "Referer": CONFIG.ZEFOY_BASE + "/",
+    "X-Requested-With": "XMLHttpRequest"
+  };
+}
+
+/* =========================================================================
+   HÀM TRÍCH XUẤT TOKEN ẨN
+   =========================================================================
+   Zefoy nhúng token động trong HTML. Hàm này tìm và trả về token
+   từ phản hồi nếu có. Trả về null nếu không tìm thấy.
+   ========================================================================= */
+function extractToken(html) {
+  // Mẫu token phổ biến trong các phiên bản Zefoy
+  const patterns = [
+    /name="([a-f0-9]{32})"\s+value=""/i,
+    /token["']?\s*[:=]\s*["']([^"']+)["']/i,
+    /<input[^>]+name="([^"]+)"[^>]*value="([^"]*)"/i
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    if (m) return m[1] || m[2];
+  }
+  return null;
+}
+
+/* =========================================================================
+   HÀM GỬI REQUEST BUFFER
+   =========================================================================
+   Gửi một yêu cầu POST tới endpoint dịch vụ với URL video và token.
+   Trả về object { success, message }.
+   ========================================================================= */
+async function sendBufferRequest(videoUrl, service, token) {
+  const endpoint = CONFIG.ENDPOINTS[service];
+  if (!endpoint) {
+    return { success: false, message: "Dịch vụ không hợp lệ." };
+  }
+
+  const body = new URLSearchParams({
+    [token]: videoUrl,
+    "Submit": "Search"
+  });
+
+  try {
+    const res = await fetch(CONFIG.ZEFOY_BASE + endpoint, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: body.toString(),
+      credentials: "include"
+    });
+
+    if (!res.ok) {
+      return { success: false, message: `HTTP ${res.status}` };
+    }
+
+    const text = await res.text();
+
+    // Phát hiện dấu hiệu thành công / thất bại trong phản hồi
+    if (/success|completed|added/i.test(text)) {
+      return { success: true, message: "Buffer thành công." };
+    }
+    if (/error|invalid|not found|captcha/i.test(text)) {
+      return { success: false, message: "Zefoy từ chối: captcha hoặc URL sai." };
+    }
+    return { success: true, message: "Phản hồi không xác định, coi như thành công." };
+  } catch (e) {
+    return { success: false, message: `Lỗi mạng: ${e.message}` };
+  }
+}
+
+/* =========================================================================
+   HÀM TRÍCH XUẤT TOKEN BAN ĐẦU
+   =========================================================================
+   Tải trang chủ Zefoy để lấy token động trước khi buffer.
+   ========================================================================= */
+async function fetchInitialToken() {
+  try {
+    const res = await fetch(CONFIG.ZEFOY_BASE + "/", {
+      method: "GET",
+      headers: { "Cookie": CONFIG.cookie, "User-Agent": buildHeaders()["User-Agent"] },
+      credentials: "include"
+    });
+    const html = await res.text();
+    return extractToken(html);
+  } catch (e) {
+    writeLog(`Không lấy được token: ${e.message}`, "err");
+    return null;
+  }
+}
+
+/* =========================================================================
+   HÀM NGỦ (DELAY)
+   ========================================================================= */
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+/* =========================================================================
+   HÀM KHỞI CHẠY QUY TRÌNH BUFFER
+   =========================================================================
+   - Kiểm tra đầu vào.
+   - Lấy token.
+   - Lặp gửi request tới khi đạt số lượng hoặc maxRequests.
+   - Cập nhật log và tiến trình.
+   ========================================================================= */
+async function startBuffering() {
+  const videoUrl = el.url.value.trim();
+  const service  = el.service.value;
+  const amount   = parseInt(el.amount.value, 10) || 0;
+
+  // Kiểm tra đầu vào cơ bản
+  if (!videoUrl || !/^https?:\/\//.test(videoUrl)) {
+    writeLog("URL video không hợp lệ.", "err");
+    return;
+  }
+  if (amount < 1) {
+    writeLog("Số lượng phải >= 1.", "err");
+    return;
+  }
+  if (!CONFIG.cookie || CONFIG.cookie.includes("THAY_THE")) {
+    writeLog("Chưa cấu hình cookie Zefoy. Cập nhật CONFIG.cookie.", "err");
+    return;
+  }
+
+  // Khóa nút và reset log
+  el.startBtn.disabled = true;
+  el.startBtn.textContent = "Đang chạy...";
+  el.log.innerHTML = "";
+  setProgress(0);
+
+  writeLog(`Khởi động buffer: ${service} / ${amount}`, "inf");
+
+  // Lấy token động
+  writeLog("Đang lấy token phiên...", "inf");
+  const token = await fetchInitialToken();
+  if (!token) {
+    writeLog("Không lấy được token. Dừng.", "err");
+    el.startBtn.disabled = false;
+    el.startBtn.textContent = "Bắt đầu Buffer";
+    return;
+  }
+  writeLog(`Token: ${token}`, "ok");
+
+  // Tính số request cần gửi (mỗi request ~ 1000 đơn vị)
+  const unitPerRequest = 1000;
+  const totalRequests = Math.min(
+    Math.ceil(amount / unitPerRequest),
+    CONFIG.maxRequests
+  );
+
+  writeLog(`Sẽ gửi ${totalRequests} request.`, "inf");
+
+  let success = 0;
+  let fail = 0;
+
+  // Vòng lặp gửi request
+  for (let i = 0; i < totalRequests; i++) {
+    const result = await sendBufferRequest(videoUrl, service, token);
+
+    if (result.success) {
+      success++;
+      writeLog(`[${i + 1}/${totalRequests}] OK - ${result.message}`, "ok");
+    } else {
+      fail++;
+      writeLog(`[${i + 1}/${totalRequests}] FAIL - ${result.message}`, "err");
+    }
+
+    setProgress(((i + 1) / totalRequests) * 100);
+
+    // Nghỉ giữa các request
+    if (i < totalRequests - 1) {
+      await sleep(CONFIG.delay);
+    }
+  }
+
+  // Kết thúc
+  writeLog(`Hoàn tất. Thành công: ${success}, Thất bại: ${fail}`, "inf");
+  el.startBtn.disabled = false;
+  el.startBtn.textContent = "Bắt đầu Buffer";
+}
+
+/* =========================================================================
+   GẮN SỰ KIỆN
+   ========================================================================= */
+el.startBtn.addEventListener("click", startBuffering);
+
+// Cho phép nhấn Enter trong ô URL để chạy
+el.url.addEventListener("keydown", e => {
+  if (e.key === "Enter") startBuffering();
+});
+</script>
+
+</body>
+</html>
